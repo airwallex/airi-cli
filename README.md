@@ -1,2 +1,239 @@
 # airi-cli
-Airi command-line interface
+
+![Version](https://img.shields.io/badge/version-0.1.0-orange)
+
+Command-line tool for the Airi wallet. Authenticate with OAuth, inspect your
+session, and drive an **agentic checkout** — list payment methods, create a
+payment mandate, fetch the single-use checkout credential, and report the
+result — from your terminal or an AI agent.
+
+Results are printed to stdout as JSON, so they are easy to consume from scripts
+and agents.
+
+## Installation
+
+airi-cli is available for macOS and Linux as a single self-contained binary.
+The installer auto-detects your OS and architecture, verifies the SHA256
+checksum, installs to `~/.local/bin/airi-cli`, and deploys the bundled agent
+skills into your local AI-agent skill directories:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh
+```
+
+Environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `AIRI_CLI_VERSION` | Pin a specific release tag (e.g. `v0.1.0`). Defaults to the version bundled in the installer script. |
+| `AIRI_CLI_INSTALL_DIR` | Install location. Defaults to `$HOME/.local/bin`. |
+| `AIRI_CLI_SKIP_CHECKSUM` | **Local development only.** Set to `1` to bypass SHA256 verification. Never use this in production or CI. |
+| `AIRI_CLI_SKIP_SKILLS` | Set to `1` to skip deploying the bundled agent skills. |
+| `AIRI_CLI_SKILL_DIRS` | Space-separated skill directories to deploy to (default: the CLI's auto-detected agent dirs). |
+
+Exit codes: `0` success, `1` generic failure, `2` unsupported platform, `3` checksum mismatch, `4` network failure.
+
+## Quick start
+
+Sign in:
+
+```bash
+airi-cli auth login
+```
+
+`login` shows a verification URL and a code:
+
+```
+╭─ Sign in to Airi ─────────────────────────────────╮
+│ Open this URL and enter the code to sign in:      │
+│                                                   │
+│   https://app.airi.com/device                     │
+│   Code: WXYZ-1234                                 │
+│                                                   │
+│ Expires in 10 min. Press Enter to open it in your │
+│ browser.                                          │
+│ Waiting for authorization…                        │
+╰───────────────────────────────────────────────────╯
+```
+
+Open the URL in a browser (or press Enter to open it for you), enter the code,
+and approve. The command confirms once you're signed in:
+
+```
+╭─ airi-cli ──────────────────────────────╮
+│ ✓  Signed in                            │
+│    Session expires: 2026-08-12 (in 29d) │
+╰─────────────────────────────────────────╯
+```
+
+Check your status at any time:
+
+```bash
+airi-cli auth whoami
+```
+
+List the payment methods available for agentic checkout (a quick way to confirm
+your access token works):
+
+```bash
+airi-cli payment-methods list
+```
+
+## Agentic checkout
+
+The `mandate` commands drive a checkout on the user's behalf. The typical flow,
+after `auth login`, is:
+
+1. **Pick a payment method** — `airi-cli payment-methods list` returns the cards
+   available for agentic checkout; keep the `paymentMethodId` you want to use.
+2. **Create a mandate** — `airi-cli mandate create` records the merchant, order
+   total, currency, and line items. The response includes a `mandate_id` and a
+   passkey/verification URL for the user to approve the payment.
+
+   ```bash
+   airi-cli mandate create \
+     --source "<agent-name>" \
+     --payment-method-id "<payment-method-id>" \
+     --merchant-name "Acme" --merchant-url "https://acme.example" \
+     --merchant-country "US" \
+     --total-amount "42.00" --currency "USD" \
+     --item "name:Widget,unit_price:21.00,quantity:2" \
+     --description "Order #1234"
+   ```
+
+3. **Fetch the credential** — after the user approves in their browser,
+   `airi-cli mandate get-credential --mandate-id <id>` polls until the mandate is
+   authorized and returns a single-use credential (tokenized PAN, expiry, CVV).
+   Prefer `--file <path>`: the full credential is written to a `0600` file and
+   stdout shows only a fixed `{"status":"saved"}` receipt, so the secret stays
+   out of your terminal, logs, and an agent's transcript.
+
+   ```bash
+   airi-cli mandate get-credential --mandate-id "<mandate-id>" --file /tmp/airi-cred.json
+   ```
+
+4. **Report the result** — after submitting the checkout, always report the
+   outcome with `airi-cli mandate result --mandate-id <id> --result <SUCCEEDED|CANCELLED|DECLINED>`.
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `airi-cli auth login` | Sign in via the OAuth device flow. |
+| `airi-cli auth poll` | Wait for a non-blocking login to be approved. |
+| `airi-cli auth whoami` | Print the current sign-in status. |
+| `airi-cli auth logout` | Sign out by removing the stored session (local only). |
+| `airi-cli payment-methods list` | List payment methods available for agentic checkout. |
+| `airi-cli mandate create` | Create a payment mandate for a checkout. |
+| `airi-cli mandate get-credential` | Poll for and fetch the single-use checkout credential. |
+| `airi-cli mandate result` | Report the transaction outcome for a mandate. |
+| `airi-cli skills install` | Deploy the bundled agent skills into local AI-agent skill directories. |
+| `airi-cli skills list` | List the agent skills bundled in the binary. |
+
+Flags for `airi-cli auth login`:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--client-name` | `CLI` | Name to register this client under. |
+
+Flags for `airi-cli auth whoami`:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--verbose` | `false` | Include device details (name, platform, device id). |
+
+Flags for `airi-cli mandate create` (all required):
+
+| Flag | Description |
+| --- | --- |
+| `--source` | Agent source identifier (use the calling agent's name). |
+| `--payment-method-id` | Payment method ID from `payment-methods list`. |
+| `--merchant-name` | Merchant name. |
+| `--merchant-url` | Merchant URL. |
+| `--merchant-country` | Merchant country code. |
+| `--total-amount` | Total order amount. |
+| `--currency` | Order currency code. |
+| `--item` | Line item as `name:<product>,unit_price:<price>,quantity:<n>` (repeat `--item` per item). |
+| `--description` | Mandate description. |
+
+Flags for `airi-cli mandate get-credential`:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--mandate-id` | — | Mandate ID (required). |
+| `--interval` | `2` | Poll interval while waiting for authorization (seconds). |
+| `--timeout` | `300` | Stop polling after this many seconds. |
+| `--file` | — | Write the credential to this file (`0600`) instead of printing it; stdout shows only a fixed `{"status":"saved"}` receipt. |
+| `--force` | `false` | Overwrite the `--file` target if it already exists. |
+
+Flags for `airi-cli mandate result`:
+
+| Flag | Description |
+| --- | --- |
+| `--mandate-id` | Mandate ID (required). |
+| `--result` | Transaction result: `SUCCEEDED`, `CANCELLED`, or `DECLINED` (required). |
+| `--reason` | Optional reason, e.g. when the result is `DECLINED`. |
+
+Global flags:
+
+| Flag | Description |
+| --- | --- |
+| `-o`, `--output` | Output format: `auto` (default), `text`, or `json`. |
+| `--pretty` | Pretty-print JSON output (JSON mode only). |
+| `--no-telemetry` | Disable anonymous usage telemetry for the invocation. |
+| `-V`, `--version` | Print the CLI version. |
+
+### Output
+
+`--output auto` (the default) renders human-friendly boxed **text** on an
+interactive terminal and machine-readable **JSON** when the output is piped or
+redirected — so scripts and agents get JSON automatically without any flag.
+Force a mode with `-o text` or `-o json`. In JSON mode, `--pretty` indents the
+output. `auth whoami` and `auth login` omit device diagnostics
+(`name`/`platform`/`device_id`) by default; `auth whoami --verbose` includes
+them.
+
+## Telemetry
+
+The CLI sends anonymous usage events — command name, exit code, duration,
+platform, and runtime/agent context — to help improve the tool. Events contain
+no tokens, no account information, and no command arguments, and are keyed by a
+random per-install identifier.
+
+Disable telemetry with any of:
+
+- the `--no-telemetry` flag,
+- `AIRI_TELEMETRY_DISABLED=1` (or `DISABLE_TELEMETRY=1`),
+- an empty `telemetryUrl` in your config.
+
+## Skills
+
+airi-cli bundles agent skill definitions that describe how an AI agent uses the
+tool. They are embedded into the binary, so every install carries the skills for
+its version. The install script deploys them for you; you can also (re)deploy
+them at any time:
+
+```bash
+airi-cli skills install                     # canonical dir + detected agents
+airi-cli skills install --all               # every known agent, detected or not
+airi-cli skills install --dir ./my-skills   # explicit destination(s)
+airi-cli skills list                        # show which skills the binary carries
+```
+
+`skills install` **auto-detects** installed agents. It always writes the
+canonical `~/.agents/skills` (the open Agent Skills standard location), and
+additionally writes each known agent whose config directory already exists:
+
+| Agent | Detected via | Skills dir |
+| --- | --- | --- |
+| Claude Code | `~/.claude/` | `~/.claude/skills` |
+| opencode | `~/.config/opencode/` | `~/.config/opencode/skills` |
+| Codex | `~/.codex/` | `~/.codex/skills` |
+| Cursor | `~/.cursor/` | `~/.cursor/skills` |
+| Windsurf | `~/.codeium/windsurf/` | `~/.codeium/windsurf/skills` |
+| GitHub Copilot | `~/.copilot/` | `~/.copilot/skills` |
+| Gemini CLI | `~/.gemini/` | `~/.gemini/skills` |
+
+Use `--all` to write every known agent dir regardless of detection, or `--dir`
+to pick your own. Skills are copied (not symlinked), so re-running
+`skills install` after an upgrade re-syncs every target.
