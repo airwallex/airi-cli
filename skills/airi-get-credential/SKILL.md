@@ -14,10 +14,13 @@ Use the `airi-cli` tool to obtain a single-use payment credential from the user'
 - `airi-cli` is installed and available on the `PATH`. Always run `airi-cli --help` yourself to confirm this — do not rely on the user's statement about whether it is installed. If the command is not found, help the user install it before continuing:
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh
+  npm install -g @airwallex/airi-cli@beta
   ```
-
-  The installer downloads the binary to `~/.local/bin` and updates the shell's PATH — after it finishes, the user may need to restart their shell (or `source` their rc file) before `airi-cli` is available.
+- **Check for updates.** Once `airi-cli` is on the `PATH`, confirm it is up to date:
+  ```bash
+  airi-cli version --check
+  ```
+  If the response includes `"update_available":true`, a newer version is available — run the `install_command` from that response to upgrade before proceeding, then briefly let the user know you updated the tool. The check never blocks: if it returns `"update_available":false`, just continue.
 
 ## Your agent name
 
@@ -39,15 +42,20 @@ Check whether the user is logged in:
 airi-cli auth whoami
 ```
 
-If `whoami` already shows the user as authenticated, skip the rest of this step.
+Decide what to do next from the **`authenticated`** field in the result:
 
-Otherwise, start login. Pass your own agent name as `--client-name` (see "Your agent name" above):
+- `"authenticated": true` — the user is signed in. Skip the rest of this step. (`whoami` refreshes the token automatically when it is close to expiring, so a still-usable session always reports `true`.)
+- `"authenticated": false` — the user is not signed in, or the session expired and could not be refreshed. Continue with login below.
+
+To start login, pass your own agent name as `--client-name` (see "Your agent name" above):
 
 ```bash
 airi-cli auth login --client-name <agent-name>
 ```
 
-When called by an agent (a non-interactive, non-TTY caller), `auth login` is **non-blocking**: it returns immediately with a login URL (`verification_uri`) and a `user_code`. Present the login URL and code to the user and ask them to open it and approve the connection.
+When called by an agent (a non-interactive, non-TTY caller), `auth login` is **non-blocking**: it returns immediately as JSON, e.g. `{"status":"awaiting_authorization","verification_uri":"...","user_code":"...","expires_in":900,"interval":2}`.
+
+**Before polling, you MUST first present the login to the user.** Read `verification_uri` and `user_code` verbatim from that JSON and show them prominently — URL on its own line, code on its own line — and ask the user to open the URL and approve.
 
 Then poll until login completes:
 
@@ -55,16 +63,17 @@ Then poll until login completes:
 airi-cli auth poll
 ```
 
-Start polling **immediately** after showing the URL — do **not** wait for the user to tell you they have finished. `auth poll` blocks and polls until the user has approved (or the poll window elapses).
+Start polling **immediately** after showing the URL — do **not** wait for the user to tell you they have finished. A single `auth poll` call blocks and polls for a few minutes, then returns.
 
-- If it returns `"status": "authorization_pending"` (`timeout: true`), the login is still pending — run `airi-cli auth poll` again to keep waiting, and let the user know you are still waiting.
-- If it returns any other error, surface it to the user.
+Run them with a tool timeout of **at least 5 minutes**, and do not pipe them through `head`/`tail` (it can drop output). If your own call is killed by a tool timeout, treat it as *still pending* — run `airi-cli auth poll` again. Do **not** treat a tool-level timeout as a login failure.
 
-When the user is authenticated, continue.
+- While it keeps returning `"status": "authorization_pending"`, the user simply has not approved yet — run `airi-cli auth poll` **again** to keep waiting (tell the user you are still waiting). Do **not** re-run `airi-cli auth login`; that issues a new code and invalidates the one the user is approving.
+- On **signed in**, continue.
+- On **anything else** (an error such as the login code expiring or the user denying the request), show the result to the user and let them decide whether to keep polling or log in again.
 
 ### Re-authentication (applies to every step)
 
-If any `airi-cli` command fails with an authentication or token error — for example the token has expired or has been revoked for this device — repeat Step 1 (run `airi-cli auth login --client-name <agent-name>`, show the returned login URL to the user, then run `airi-cli auth poll` until authenticated), then retry the command that failed.
+Every `airi-cli` command refreshes the access token automatically — proactively before each call when it is close to expiring, and reactively if the server rejects it — so you never need to refresh it yourself. Because of this, if a command still fails with an authentication or token error (for example the token is expired or has been revoked for this device, or a command reports the session as unauthenticated), the token could not be refreshed and the user must sign in again: repeat Step 1 (run `airi-cli auth login --client-name <agent-name>`, show the returned login URL to the user, then run `airi-cli auth poll` until authenticated), then retry the command that failed.
 
 ## Step 2 — List and select a payment method
 
@@ -96,7 +105,7 @@ airi-cli mandate create \
 - Repeat `--item` once per line item on the order.
 - Make sure `--total-amount` and `--currency` match what the merchant page shows.
 
-The response contains a `mandate_id` and a `passkey_url`. Prompt the user to open the `passkey_url` in their browser and confirm the transaction. This passkey confirmation is the user's approval of the payment — there is no need to ask the user to confirm the purchase again later.
+The response contains a `mandate_id` and a `passkey_url`. **Before continuing to Step 4, you MUST present the passkey URL to the user** . Read `passkey_url` verbatim and show it prominently on its own line, and ask the user to open it and confirm the transaction. Keep the `mandate_id` for the next steps. This passkey confirmation is the user's approval of the payment.
 
 ## Step 4 — Get the payment credential
 
@@ -108,7 +117,7 @@ airi-cli mandate get-credential \
   --file /tmp/airi-cred.json
 ```
 
-This command **blocks and polls periodically**, waiting while the user confirms in their browser, and returns as soon as the user has confirmed (or fails if it times out).
+This command **blocks and polls** while the user confirms in their browser, returning as soon as they have confirmed. Run it with a tool timeout of **at least 5 minutes** and do not pipe it through `head`/`tail`.
 
 **Always use `--file`.** It is the safe way to handle the one-time credential:
 
@@ -116,8 +125,7 @@ This command **blocks and polls periodically**, waiting while the user confirms 
 - To fill the merchant's checkout form, read the raw values **from the file** at the moment you need them. Do **not** echo them back to the user or copy them into your memory, notes, or a summary.
 - **Delete the file** (e.g. `rm /tmp/airi-cred.json`) once the checkout has been submitted.
 
-- If it times out, tell the user and ask whether to keep waiting; if yes, run the same command again.
-- If it returns any other error, surface it to the user rather than retrying blindly.
+A timeout means the user has not confirmed yet — not a failure. This covers both the command's own timeout (`Timed out after …s waiting for credential authorization.`) and your own call being killed by a tool timeout; nothing is written to `--file` in either case. On a timeout, tell the user you are still waiting and run the same command again. On **any other error**, surface it to the user rather than retrying blindly.
 
 ## Step 5 — Report the transaction result
 
