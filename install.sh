@@ -37,7 +37,7 @@ REPO="airwallex/airi-cli"
 # Baked in at release time. Kept in sync with core/version/version.go and the
 # README (enforced by scripts/check-version.sh). Update when cutting a release.
 # Includes the leading "v" to match the release tag (e.g. v0.1.0).
-LATEST_VERSION="v0.1.0"
+LATEST_VERSION="v0.1.0-beta.1"
 # ────────────────────────────────────────────────────────────────────────────
 
 BIN_NAME="airi-cli"

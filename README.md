@@ -1,6 +1,6 @@
 # airi-cli
 
-![Version](https://img.shields.io/badge/version-0.1.0-orange)
+![Version](https://img.shields.io/badge/version-0.1.0--beta.1-orange)
 
 Command-line tool for the Airi wallet. Authenticate with OAuth, inspect your
 session, and drive an **agentic checkout** — list payment methods, create a
@@ -13,25 +13,51 @@ and agents.
 ## Installation
 
 airi-cli is available for macOS and Linux as a single self-contained binary.
-The installer auto-detects your OS and architecture, verifies the SHA256
-checksum, installs to `~/.local/bin/airi-cli`, and deploys the bundled agent
-skills into your local AI-agent skill directories:
+Install it with npm:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh
+npm install -g @airwallex/airi-cli@beta
 ```
 
-Environment variables:
+This installs the `@airwallex/airi-cli` package, which downloads the prebuilt
+binary for your platform, verifies its SHA256 checksum, and puts `airi-cli` on
+your `PATH`.
+
+> **Agent skills:** deploy the bundled agent skills with `airi-cli skills install`
+> after installing (see [Skills](#skills)).
+
+Environment variables (install time):
 
 | Variable | Description |
 |----------|-------------|
-| `AIRI_CLI_VERSION` | Pin a specific release tag (e.g. `v0.1.0`). Defaults to the version bundled in the installer script. |
-| `AIRI_CLI_INSTALL_DIR` | Install location. Defaults to `$HOME/.local/bin`. |
+| `AIRI_CLI_VERSION` | Download a specific release tag (e.g. `v0.1.0`) instead of the version bundled with the package. |
+| `AIRI_CLI_SKIP_DOWNLOAD` | Set to `1` to skip the binary download during install. |
 | `AIRI_CLI_SKIP_CHECKSUM` | **Local development only.** Set to `1` to bypass SHA256 verification. Never use this in production or CI. |
-| `AIRI_CLI_SKIP_SKILLS` | Set to `1` to skip deploying the bundled agent skills. |
-| `AIRI_CLI_SKILL_DIRS` | Space-separated skill directories to deploy to (default: the CLI's auto-detected agent dirs). |
+| `AIRI_CLI_BASE_URL` | Override the release host the binary is downloaded from (for internal mirrors). |
 
-Exit codes: `0` success, `1` generic failure, `2` unsupported platform, `3` checksum mismatch, `4` network failure.
+### Checking for updates
+
+`airi-cli version` prints the installed version; `airi-cli version --check` also
+asks GitHub for the latest published release and reports whether an update is
+available:
+
+```bash
+airi-cli version            # e.g. 0.1.0
+airi-cli version --check     # reports whether a newer release exists
+```
+
+In JSON mode (the default for non-interactive callers) `--check` returns:
+
+```json
+{"current":"0.1.0","latest":"0.2.0","update_available":true,
+ "install_command":"npm install -g @airwallex/airi-cli"}
+```
+
+To update, run the `install_command` from that response to replace the binary
+with the latest release. The check is best-effort and never
+fails the command: if GitHub can't be reached it reports
+`update_available: false` with a `check_error` field, so it is safe to run as a
+pre-flight step.
 
 ## Quick start
 
@@ -60,10 +86,10 @@ Open the URL in a browser (or press Enter to open it for you), enter the code,
 and approve. The command confirms once you're signed in:
 
 ```
-╭─ airi-cli ──────────────────────────────╮
-│ ✓  Signed in                            │
-│    Session expires: 2026-08-12 (in 29d) │
-╰─────────────────────────────────────────╯
+╭─ airi-cli ──────────────────────────────────────────────╮
+│ ✓  Signed in                                             │
+│    Session expires: 2026-08-12 18:00 +08 (in 29 days)    │
+╰──────────────────────────────────────────────────────────╯
 ```
 
 Check your status at any time:
@@ -71,6 +97,17 @@ Check your status at any time:
 ```bash
 airi-cli auth whoami
 ```
+
+`whoami` reports the current sign-in status and refreshes the session token
+when it is close to expiring, so the reported expiry reflects the renewed
+session. In JSON output (`-o json`, the default for scripts and agents) the
+expiry is the `session_expires` field as an RFC3339 timestamp.
+
+Every command refreshes the access token automatically — proactively before
+each call when it is close to expiring, and reactively if the server rejects
+it — so you never have to refresh it manually. If a command still reports an
+expired or unauthenticated session, the token could not be refreshed: sign in
+again with `airi-cli auth login` and retry.
 
 List the payment methods available for agentic checkout (a quick way to confirm
 your access token works):
@@ -105,8 +142,8 @@ after `auth login`, is:
    `airi-cli mandate get-credential --mandate-id <id>` polls until the mandate is
    authorized and returns a single-use credential (tokenized PAN, expiry, CVV).
    Prefer `--file <path>`: the full credential is written to a `0600` file and
-   stdout shows only a fixed `{"status":"saved"}` receipt, so the secret stays
-   out of your terminal, logs, and an agent's transcript.
+   stdout shows only a receipt (`status`, `tokenType`, and `tokenExpiration`),
+   so the secret stays out of your terminal, logs, and an agent's transcript.
 
    ```bash
    airi-cli mandate get-credential --mandate-id "<mandate-id>" --file /tmp/airi-cred.json
@@ -129,6 +166,13 @@ after `auth login`, is:
 | `airi-cli mandate result` | Report the transaction outcome for a mandate. |
 | `airi-cli skills install` | Deploy the bundled agent skills into local AI-agent skill directories. |
 | `airi-cli skills list` | List the agent skills bundled in the binary. |
+| `airi-cli version` | Print the CLI version (add `--check` to check for a newer release). |
+
+Flags for `airi-cli version`:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--check` | `false` | Check GitHub for the latest release and report whether an update is available. |
 
 Flags for `airi-cli auth login`:
 
@@ -163,7 +207,7 @@ Flags for `airi-cli mandate get-credential`:
 | `--mandate-id` | — | Mandate ID (required). |
 | `--interval` | `2` | Poll interval while waiting for authorization (seconds). |
 | `--timeout` | `300` | Stop polling after this many seconds. |
-| `--file` | — | Write the credential to this file (`0600`) instead of printing it; stdout shows only a fixed `{"status":"saved"}` receipt. |
+| `--file` | — | Write the credential to this file (`0600`) instead of printing it; stdout shows only a receipt with `status`, `tokenType`, and the token `tokenExpiration` (no sensitive values). |
 | `--force` | `false` | Overwrite the `--file` target if it already exists. |
 
 Flags for `airi-cli mandate result`:
@@ -192,6 +236,11 @@ Force a mode with `-o text` or `-o json`. In JSON mode, `--pretty` indents the
 output. `auth whoami` and `auth login` omit device diagnostics
 (`name`/`platform`/`device_id`) by default; `auth whoami --verbose` includes
 them.
+
+Times are reported in your **local timezone** (from the environment's `TZ` /
+host setting). In text mode the expiry carries the local offset (e.g.
+`2026-08-12 18:00 +08`); in JSON mode timestamps such as `session_expires` and
+the credential's `tokenExpiration` are RFC3339 values with the local offset.
 
 ## Telemetry
 
