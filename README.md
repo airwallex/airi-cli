@@ -1,6 +1,6 @@
 # airi-cli
 
-![Version](https://img.shields.io/badge/version-0.1.0--beta.1-orange)
+![Version](https://img.shields.io/badge/version-0.1.0--beta.2-orange)
 
 Command-line tool for the Airi wallet. Authenticate with OAuth, inspect your
 session, and drive an **agentic checkout** — list payment methods, create a
@@ -13,7 +13,8 @@ and agents.
 ## Installation
 
 airi-cli is available for macOS and Linux as a single self-contained binary.
-Install it with npm:
+
+### npm
 
 ```bash
 npm install -g @airwallex/airi-cli@beta
@@ -23,17 +24,68 @@ This installs the `@airwallex/airi-cli` package, which downloads the prebuilt
 binary for your platform, verifies its SHA256 checksum, and puts `airi-cli` on
 your `PATH`.
 
-> **Agent skills:** deploy the bundled agent skills with `airi-cli skills install`
-> after installing (see [Skills](#skills)).
+To run it once without installing globally, use npx:
 
-Environment variables (install time):
+```bash
+npx @airwallex/airi-cli@beta
+```
+
+#### Switching from a `curl | sh` install
+
+If you previously installed with the `install.sh` script (via `curl`), remove
+that copy first — otherwise it may stay ahead of the npm one on your `PATH` and
+keep shadowing it, so `airi-cli` keeps running the old binary.
+
+Check for more than one `airi-cli` on your `PATH`:
+
+```bash
+which -a airi-cli
+```
+
+If an entry under `~/.local/bin` (the `install.sh` default) shows up alongside
+the npm one, remove the old install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh -s -- uninstall
+```
+
+Then reopen your shell and re-check with `which -a airi-cli`.
+
+### install.sh (fallback)
+
+If npm is not available, install the binary directly with the install script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh
+```
+
+To uninstall (removes the binary and local state):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh -s -- uninstall
+```
+
+### Install-time environment variables
+
+Both install methods honour the same variables and behave identically, except
+where noted:
 
 | Variable | Description |
 |----------|-------------|
-| `AIRI_CLI_VERSION` | Download a specific release tag (e.g. `v0.1.0`) instead of the version bundled with the package. |
-| `AIRI_CLI_SKIP_DOWNLOAD` | Set to `1` to skip the binary download during install. |
+| `AIRI_CLI_VERSION` | Install a specific release tag (e.g. `v0.1.0`) instead of the default. With npm the pinned checksum only matches the package's own version, so overriding it there also requires `AIRI_CLI_SKIP_CHECKSUM=1`. |
+| `AIRI_CLI_INSTALL_DIR` | install.sh only: where to install (default: `$HOME/.local/bin`). npm always installs inside the package and ignores this. |
 | `AIRI_CLI_SKIP_CHECKSUM` | **Local development only.** Set to `1` to bypass SHA256 verification. Never use this in production or CI. |
-| `AIRI_CLI_BASE_URL` | Override the release host the binary is downloaded from (for internal mirrors). |
+| `AIRI_CLI_SKIP_SKILLS` | Set to `1` to skip deploying the bundled agent skills. |
+
+Both methods deploy the bundled agent skills at install time. You can also
+deploy them to a specific project with:
+
+```bash
+npx skills add airwallex/airi-cli
+```
+
+or re-run deployment any time with `airi-cli skills install` (see
+[Skills](#skills)).
 
 ### Checking for updates
 
