@@ -8,13 +8,15 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh
 #
+# Uninstall (removes the binary and local state):
+#   curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh -s -- uninstall
+#   # or, from a local checkout:  ./install.sh uninstall
+#
 # Environment variables:
 #   AIRI_CLI_VERSION         pin a specific release tag (default: baked LATEST_VERSION)
 #   AIRI_CLI_INSTALL_DIR     install location (default: $HOME/.local/bin)
 #   AIRI_CLI_SKIP_CHECKSUM   set to 1 to skip SHA256 verification (local-dev only)
 #   AIRI_CLI_SKIP_SKILLS     set to 1 to skip deploying agent skills
-#   AIRI_CLI_SKILL_DIRS      space-separated skill dirs to deploy to
-#                            (default: the CLI's built-in agent dirs)
 #
 # Exit codes:
 #   0  success
@@ -37,7 +39,7 @@ REPO="airwallex/airi-cli"
 # Baked in at release time. Kept in sync with core/version/version.go and the
 # README (enforced by scripts/check-version.sh). Update when cutting a release.
 # Includes the leading "v" to match the release tag (e.g. v0.1.0).
-LATEST_VERSION="v0.1.0-beta.1"
+LATEST_VERSION="v0.1.0-beta.2"
 # ────────────────────────────────────────────────────────────────────────────
 
 BIN_NAME="airi-cli"
@@ -179,20 +181,63 @@ install_skills() {
         return 0
     fi
     step "Deploying agent skills"
-    # Build optional --dir args from AIRI_CLI_SKILL_DIRS (space-separated).
-    set --
-    if [ -n "${AIRI_CLI_SKILL_DIRS:-}" ]; then
-        for _d in $AIRI_CLI_SKILL_DIRS; do
-            set -- "$@" --dir "$_d"
-        done
-    fi
-    if "${INSTALL_DIR}/${BIN_NAME}" --no-telemetry -o text skills install "$@"; then
+    if "${INSTALL_DIR}/${BIN_NAME}" --no-telemetry -o text skills install; then
         return 0
     fi
     warn "Skill deployment failed; you can retry later with: ${BIN_NAME} skills install"
 }
 
-main() {
+usage() {
+    cat <<EOF
+airi-cli installer
+
+Usage:
+  install.sh [install]     Download and install airi-cli (default).
+  install.sh uninstall     Remove airi-cli and its local state.
+  install.sh -h | --help   Show this help.
+
+Environment variables:
+  AIRI_CLI_VERSION         Pin a specific release tag (install only).
+  AIRI_CLI_INSTALL_DIR     Install location (default: \$HOME/.local/bin).
+  AIRI_CLI_SKIP_CHECKSUM   Set to 1 to skip SHA256 verification (local-dev only).
+  AIRI_CLI_SKIP_SKILLS     Set to 1 to skip deploying agent skills.
+EOF
+}
+
+# Remove the installed binary and the local state dir. Mirrors what install()
+# creates: the binary at INSTALL_DIR/BIN_NAME and the STATE_DIR. The PATH entry
+# the installer may have appended to an rc file is left untouched — removing it
+# reliably across shells is fragile, and a stale PATH entry pointing at a
+# now-empty dir is harmless. Agent skills deployed into external AI-agent dirs
+# are likewise left in place; they are owned by those tools, not the installer.
+# Exits 0 even when nothing was found, so `uninstall` is safe to run twice.
+uninstall() {
+    header
+
+    _bin="${INSTALL_DIR}/${BIN_NAME}"
+    _removed=0
+
+    if [ -e "$_bin" ]; then
+        step "Removing ${DIM}${_bin}${RESET}"
+        rm -f "$_bin" || err "Failed to remove ${_bin}"
+        _removed=1
+    fi
+
+    if [ -d "$STATE_DIR" ]; then
+        step "Removing state ${DIM}${STATE_DIR}${RESET}"
+        rm -rf "$STATE_DIR" || err "Failed to remove ${STATE_DIR}"
+        _removed=1
+    fi
+
+    if [ "$_removed" -eq 1 ]; then
+        ok "Uninstalled ${BOLD}${BIN_NAME}${RESET}"
+        printf '\n  %sAgent skills and any PATH entry added at install time were left in place.%s\n\n' "$DIM" "$RESET"
+    else
+        warn "No airi-cli installation found in ${INSTALL_DIR}."
+    fi
+}
+
+install() {
     command -v curl >/dev/null 2>&1 || err "curl is required but not installed"
     command -v tar  >/dev/null 2>&1 || err "tar is required but not installed"
 
@@ -256,6 +301,17 @@ main() {
     esac
 
     printf '\n  Run %s%s --help%s to get started.\n\n' "$BOLD" "$BIN_NAME" "$RESET"
+}
+
+# Dispatch on the first argument. Default (no args) installs, matching the
+# documented `curl … | sh` entry point.
+main() {
+    case "${1:-install}" in
+        install)        install ;;
+        uninstall)      uninstall ;;
+        -h|--help|help) usage ;;
+        *)              err "Unknown command: $1 (expected: install, uninstall)" ;;
+    esac
 }
 
 main "$@"

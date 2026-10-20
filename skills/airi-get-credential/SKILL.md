@@ -11,16 +11,28 @@ Use the `airi-cli` tool to obtain a single-use payment credential from the user'
 
 ## Prerequisites
 
-- `airi-cli` is installed and available on the `PATH`. Always run `airi-cli --help` yourself to confirm this — do not rely on the user's statement about whether it is installed. If the command is not found, help the user install it before continuing:
+Make sure a proper `airi-cli` is installed before authenticating the user.
 
+- **Confirm it is installed.** Run `airi-cli --help` yourself — do not rely on the user. If it is not found, install it (see *Installing* below).
+
+- **Check for updates.** Run `airi-cli version --check`.
+  - If the `--check` flag is not recognized (the command errors on the unknown flag), the installed build predates this feature — reinstall it (see *Installing* below), then re-run.
+  - Otherwise, if the response has `"update_available":true`, run its `install_command` to upgrade and tell the user. `false` → continue. The check never blocks.
+
+**Installing.**
+
+- **If npm is available**, use it:
   ```bash
   npm install -g @airwallex/airi-cli@beta
   ```
-- **Check for updates.** Once `airi-cli` is on the `PATH`, confirm it is up to date:
+  Then run `which -a airi-cli`. If an old `install.sh` copy (under `~/.local/bin`) also appears and would shadow the npm one, remove it:
   ```bash
-  airi-cli version --check
+  curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh -s -- uninstall
   ```
-  If the response includes `"update_available":true`, a newer version is available — run the `install_command` from that response to upgrade before proceeding, then briefly let the user know you updated the tool. The check never blocks: if it returns `"update_available":false`, just continue.
+- **If npm is not available**, use the install script:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/airwallex/airi-cli/master/install.sh | sh
+  ```
 
 ## Your agent name
 
